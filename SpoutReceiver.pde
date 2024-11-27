@@ -20,7 +20,7 @@ PImage img; // Image to receive a texture
 // CONFIG
 int num_neopixels = 200;
 String tree_host = "10.0.1.26";
-int tree_host_port = 12345;
+int tree_host_port = 5705;
 int buffer_depth_millis = 1000;  //ms. Covers transport delay + jitter.  Same as audio. 
 
 // FRAME DATA
@@ -38,7 +38,7 @@ long ts_ms;
 Instant frame_instant;   // frame timestamp
 long delay_compensation_millis = 0;  // transport delay + source/sink clock diff
 Queue<Long> delay_samples = new LinkedList<>();
-int max_samples = 40;  // sliding window
+int max_samples = 40;  // sliding window (roughly 20-40 seconds)
 
 void setup() {
   
@@ -112,7 +112,12 @@ void send_frame() {
   byte_buffer.clear();
   // add buffer depth to display timestamp
   // current time in milliseconds since the java/unix epoch (1970-01-01T00:00:00Z)
-  ts_ms = frame_instant.toEpochMilli() + buffer_depth_millis - delay_compensation_millis;
+  if (delay_compensation_millis < 0) {
+    ts_ms = frame_instant.toEpochMilli() + buffer_depth_millis + delay_compensation_millis;
+  } else {
+    ts_ms = frame_instant.toEpochMilli() + buffer_depth_millis - delay_compensation_millis;
+  }
+  //ts_ms = frame_instant.toEpochMilli() + delay_compensation_millis;
   byte_buffer.putLong(frame_instant.toEpochMilli());
   byte_buffer.putLong(ts_ms);
   for (int i : tree_frame) {
