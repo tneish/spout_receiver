@@ -19,9 +19,11 @@ PImage img; // Image to receive a texture
 
 // CONFIG
 int num_neopixels = 200;
-String tree_host = "10.0.1.26";
+String tree_host = "10.0.1.109";
+//String tree_host = "10.0.1.254";
 int tree_host_port = 5705;
 int buffer_depth_millis = 1000;  //ms. Covers transport delay + jitter.  Same as audio. 
+int max_fps = 30;   // Don't send more than this to tree
 
 // FRAME DATA
 Spout spout;
@@ -36,6 +38,7 @@ InetAddress address_tree;
 // TIME STUFF
 long ts_ms;
 Instant frame_instant;   // frame timestamp
+Instant next_frame = Instant.now();  // For rate limiting
 long delay_compensation_millis = 0;  // transport delay + source/sink clock diff
 Queue<Long> delay_samples = new LinkedList<>();
 int max_samples = 40;  // sliding window (roughly 20-40 seconds)
@@ -159,11 +162,10 @@ void quadrants_four_arcs() {
         x = pixelWidth/2 - 1 + int(floor(r[i]*cos(th)*((pixelWidth-1)/2)));
         y = pixelHeight/2 - 1 + int(floor(r[i]*sin(th)*((pixelHeight-1)/2)));
         if (p < t*np + np) {  // float compound inaccuracy gives + 1 
-          System.arraycopy(pixels_copy, y*width+x, tree_frame, p, 1);  // want copy, not ref
+          System.arraycopy(pixels_copy, max(y*width+x,0), tree_frame, p, 1);  // want copy, not ref
           p+=1;
-          rectMode(CENTER);
           fill(pixels_copy[y*width+x]);
-          rect(x, y, 10, 10);
+          circle(x, y, 10);
         }
       }
       // anti-clockwise, one quarter turn
@@ -171,11 +173,10 @@ void quadrants_four_arcs() {
         x = pixelWidth/2 - 1 + int(floor(r[i+1]*cos(th)*((pixelWidth-1)/2)));
         y = pixelHeight/2 - 1 + int(floor(r[i+1]*sin(th)*((pixelHeight-1)/2)));
         if (p < t*np + np) {  // float compound inaccuracy gives + 1 
-          System.arraycopy(pixels_copy, y*width+x, tree_frame, p, 1);  // want copy, not ref
+          System.arraycopy(pixels_copy, max(y*width+x,0), tree_frame, p, 1);  // want copy, not ref
           p+=1;
-          rectMode(CENTER);
           fill(pixels_copy[y*width+x]);
-          rect(x, y, 10, 10);
+          circle(x, y, 10);
         }
       }
     }
@@ -198,7 +199,7 @@ void update_delay_compensation() {
     // Extract the first two 8-byte long values
     ByteBuffer b = ByteBuffer.wrap(buffer);
     long ts_source = b.getLong();
-    long ts_sink = b.getLong();
+    long ts_sink = b.getLong() / 1000000; // in ns
     if (delay_samples.size() < max_samples) {
       delay_samples.offer(ts_sink - ts_source);
     } else {
@@ -250,8 +251,11 @@ void draw() {
 
     quadrants_four_arcs();
     
-    if (spout.isReceiverConnected()) {
+    if (spout.isReceiverConnected() 
+        && frame_instant.isAfter(next_frame)) {
+      //println("sending frame..");
       send_frame();
+      next_frame = frame_instant.plusMillis(1000/max_fps);
       update_delay_compensation();
     }
 
