@@ -22,7 +22,9 @@ int num_neopixels = 200;
 String tree_host = "10.0.1.109";
 //String tree_host = "10.0.1.254";
 int tree_host_port = 5705;
-int buffer_depth_millis = 1000;  //ms. Covers transport delay + jitter.  Same as audio. 
+//ms. Covers transport delay + jitter.  Same as streamed audio.
+//int buffer_depth_millis = 1000;  
+int buffer_depth_millis = 0;
 int max_fps = 30;   // Don't send more than this to tree
 
 // FRAME DATA
@@ -31,7 +33,8 @@ int[] pixels_copy;
 int[] tree_frame = new int[num_neopixels];  // rgbw, 32bits per pixel
 
 // TRANSPORT STUFF
-ByteBuffer byte_buffer = ByteBuffer.allocate(16 + tree_frame.length * 4);  //2xint64 timestamp + int32 pixels
+//2xint64 timestamp + int32 pixels
+ByteBuffer byte_buffer = ByteBuffer.allocate(16 + tree_frame.length * 4);  
 DatagramSocket udp_socket;
 InetAddress address_tree;
 
@@ -113,12 +116,17 @@ void send_frame() {
   // int64 timestamp to display on tree
   // int32[] pixel values in frame
   byte_buffer.clear();
+  byte_buffer.order(ByteOrder.BIG_ENDIAN);
   // add buffer depth to display timestamp
   // current time in milliseconds since the java/unix epoch (1970-01-01T00:00:00Z)
   if (delay_compensation_millis < 0) {
-    ts_ms = frame_instant.toEpochMilli() + buffer_depth_millis + delay_compensation_millis;
+    ts_ms = frame_instant.toEpochMilli() 
+              + buffer_depth_millis 
+              + delay_compensation_millis;
   } else {
-    ts_ms = frame_instant.toEpochMilli() + buffer_depth_millis - delay_compensation_millis;
+    ts_ms = frame_instant.toEpochMilli() 
+              + buffer_depth_millis 
+              - delay_compensation_millis;
   }
   //ts_ms = frame_instant.toEpochMilli() + delay_compensation_millis;
   byte_buffer.putLong(frame_instant.toEpochMilli());
@@ -150,30 +158,37 @@ void quadrants_four_arcs() {
   float r[] = {1.0, 0.75, 0.5, 0.25};  // radius
   float theta[] = {0, HALF_PI, PI, PI+HALF_PI, TWO_PI};  // radians
 
-  // neopixels are placed in the same order they appear on the string of neopixels on the tree
-  // (back and forwards and one 50-neopixel string per quadrant)
+  // neopixels are placed in the same order they appear on the string 
+  // of neopixels on the tree (back and forwards and one 50-neopixel 
+  // string per quadrant)
   for (int t = 0; t < 4; t += 1) {  // for each quadrant/string of neopixels
     //p = t*50;
     for (int i = 0; i < 4; i += 2) {  // repeat twice (4 arcs)
       // clock-wise around the tree, one quarter turn
       // number of neopixels on r=1 arc is 50 * 1/(1+0.75+0.5+0.25) = 20
       // (arc length = r * theta)
-      for (float th=theta[t]; th < theta[t+1]; th+=HALF_PI/(np*r[i]/(1+0.75+0.5+0.25))) {
+      for (float th=theta[t]; 
+             th < theta[t+1]; 
+             th+=HALF_PI/(np*r[i]/(1+0.75+0.5+0.25))) {
         x = pixelWidth/2 - 1 + int(floor(r[i]*cos(th)*((pixelWidth-1)/2)));
         y = pixelHeight/2 - 1 + int(floor(r[i]*sin(th)*((pixelHeight-1)/2)));
-        if (p < t*np + np) {  // float compound inaccuracy gives + 1 
-          System.arraycopy(pixels_copy, max(y*width+x,0), tree_frame, p, 1);  // want copy, not ref
+        if (p < t*np + np) {  // float compound inaccuracy gives + 1
+          // want copy, not ref
+          System.arraycopy(pixels_copy, max(y*width+x,0), tree_frame, p, 1);  
           p+=1;
           fill(pixels_copy[y*width+x]);
           circle(x, y, 10);
         }
       }
       // anti-clockwise, one quarter turn
-      for (float th=theta[t+1]; th > theta[t]; th-=HALF_PI/(np*r[i+1]/(1+0.75+0.5+0.25))) {
+      for (float th=theta[t+1]; 
+            th > theta[t]; 
+            th-=HALF_PI/(np*r[i+1]/(1+0.75+0.5+0.25))) {
         x = pixelWidth/2 - 1 + int(floor(r[i+1]*cos(th)*((pixelWidth-1)/2)));
         y = pixelHeight/2 - 1 + int(floor(r[i+1]*sin(th)*((pixelHeight-1)/2)));
         if (p < t*np + np) {  // float compound inaccuracy gives + 1 
-          System.arraycopy(pixels_copy, max(y*width+x,0), tree_frame, p, 1);  // want copy, not ref
+          // want copy, not ref
+          System.arraycopy(pixels_copy, max(y*width+x,0), tree_frame, p, 1);  
           p+=1;
           fill(pixels_copy[y*width+x]);
           circle(x, y, 10);
@@ -198,8 +213,8 @@ void update_delay_compensation() {
     udp_socket.receive(packet);
     // Extract the first two 8-byte long values
     ByteBuffer b = ByteBuffer.wrap(buffer);
-    long ts_source = b.getLong();
-    long ts_sink = b.getLong() / 1000000; // in ns
+    long ts_source = b.getLong(); // input in ms
+    long ts_sink = b.getLong() / 1000000; // input in ns, need ms
     if (delay_samples.size() < max_samples) {
       delay_samples.offer(ts_sink - ts_source);
     } else {
@@ -246,14 +261,15 @@ void draw() {
     }
 
     loadPixels();
+
+    // Avoids tearing, or unnecessary?
     pixels_copy = new int[width*height];
-    System.arraycopy(pixels, 0, pixels_copy, 0, width*height);  // avoids tearing, or unnecessary?
+    System.arraycopy(pixels, 0, pixels_copy, 0, width*height);  
 
     quadrants_four_arcs();
     
     if (spout.isReceiverConnected() 
         && frame_instant.isAfter(next_frame)) {
-      //println("sending frame..");
       send_frame();
       next_frame = frame_instant.plusMillis(1000/max_fps);
       update_delay_compensation();
